@@ -124,11 +124,11 @@ create table public.kb_chunks (
   source_id uuid not null references public.kb_sources(id) on delete cascade,
   chunk_index integer not null,
   text text not null,
+  embedding vector(768), 
   metadata jsonb default '{}'::jsonb,
   created_at timestamptz default now()
 );
 ```
-
 
 # Turn on RLS using sql commands
 ```
