@@ -3,8 +3,8 @@ const { searchKB } = require('./rag');
 const { generateAIReply } = require('./gemini');
 const requireAuth = require('./middleware/requireAuth');
 const requireRole = require('./middleware/requireRole');
-const { initSocket, setWaState, getWaState } = require('../services/socketService');
-const waService = require('../services/waService');
+const { initSocket, setWaState, getWaState } = require('./services/socketService');
+const waService = require('./services/waService');
 
 const express = require('express');
 const dotenv = require('dotenv');
