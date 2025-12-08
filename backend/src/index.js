@@ -4,6 +4,7 @@ const express = require('express');
 const dotenv = require('dotenv');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
+const cors = require('cors');
 
 dotenv.config();
 
@@ -140,6 +141,21 @@ async function embedText(text) {
 // -------------------- Express setup --------------------
 
 const app = express();
+
+// --- CORS (allow frontend at localhost:3000 and others during dev) ---
+const origins = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
+    : '*';
+app.use(
+    cors({
+        origin: origins,
+        methods: ['GET', 'POST', 'OPTIONS'],
+        allowedHeaders: ['Content-Type'],
+    })
+);
+// Preflight for known routes (avoid path-to-regexp wildcard crash)
+app.options(['/', '/kb/add-text'], cors({ origin: origins }));
+
 app.use(express.json());
 
 app.get('/', (req, res) => {
