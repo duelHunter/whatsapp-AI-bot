@@ -1,6 +1,7 @@
 // kb.js
 const fs = require('fs');
 const path = require('path');
+const { embedText } = require('./gemini');
 
 // Path to local "vector db"
 const KB_PATH = path.join(__dirname, 'kb.json');
@@ -42,23 +43,36 @@ function chunkText(text, maxLen = 800) {
     return chunks;
 }
 
-// Cosine similarity between two vectors
-function cosineSim(a, b) {
-    let dot = 0;
-    let na = 0;
-    let nb = 0;
-    for (let i = 0; i < a.length; i++) {
-        dot += a[i] * b[i];
-        na += a[i] * a[i];
-        nb += b[i] * b[i];
+// Common helper: take a big text, embed chunks, append to kb.json
+async function addTextToKB(title, text) {
+    const kb = loadKB();
+    const chunks = chunkText(text);
+    let added = 0;
+  
+    for (const chunk of chunks) {
+      if (!chunk.trim()) continue;
+  
+      const embedding = await embedText(chunk); // calls Gemini embeddings
+  
+      kb.chunks.push({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        title,
+        text: chunk,
+        embedding,
+      });
+  
+      added++;
     }
-    return dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-10);
-}
+  
+    saveKB(kb);
+    return added;
+  }
+
 
 module.exports = {
     loadKB,
     saveKB,
     chunkText,
-    cosineSim,
+    addTextToKB,
     KB_PATH
 };
