@@ -15,6 +15,8 @@ The system is composed of four primary layers:
 - **AI & Automation Engine** – Gemini AI + RAG pipeline
 - **WhatsApp Integration** – WhatsApp Web session
 
+```
+
 ┌─────────────────────────────┐
 │        Web Dashboard         │
 │   (Next.js + TypeScript)     │
@@ -34,7 +36,7 @@ The system is composed of four primary layers:
 │      WhatsApp Interface     │
 │   (WhatsApp Web Session)    │
 └─────────────────────────────┘
-
+```
 
 Here is the sequence diagram,
 
