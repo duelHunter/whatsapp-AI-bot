@@ -19,12 +19,16 @@ function cosineSim(a, b) {
 }
 
 // RAG retrieval — return top K chunks
-async function searchKB(query, topK = 3) {
+async function searchKB(query, { topK = 3, waAccountId } = {}) {
   const kb = loadKB();
   const queryEmbedding = await embedText(query);
 
   const scored = kb.chunks
-    .filter(chunk => Array.isArray(chunk.embedding) && chunk.embedding.length === queryEmbedding.length)
+    .filter(chunk => {
+      const okEmbedding = Array.isArray(chunk.embedding) && chunk.embedding.length === queryEmbedding.length;
+      const matchesAccount = waAccountId ? chunk.wa_account_id === waAccountId : true;
+      return okEmbedding && matchesAccount;
+    })
     .map(chunk => ({
       ...chunk,
       score: cosineSim(queryEmbedding, chunk.embedding)

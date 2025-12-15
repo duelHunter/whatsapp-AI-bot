@@ -1,6 +1,8 @@
-const {  addTextToKB } = require('./kb');
+const { addTextToKB } = require('./kb');
 const { searchKB } = require('./rag');
 const { generateAIReply } = require('./gemini');
+const requireAuth = require('./middleware/requireAuth');
+const requireRole = require('./middleware/requireRole');
 
 const express = require('express');
 const dotenv = require('dotenv');
@@ -30,26 +32,35 @@ app.use(
     cors({
         origin: origins,
         methods: ['GET', 'POST', 'OPTIONS'],
-        allowedHeaders: ['Content-Type'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'x-wa-account-id'],
     })
 );
 // Preflight for known routes (avoid path-to-regexp wildcard crash)
-app.options(['/', '/kb/add-text'], cors({ origin: origins }));
+app.options(['/', '/kb/add-text', '/kb/upload-pdf'], cors({ origin: origins }));
 
 app.use(express.json());
+
+function getWaAccountId(req) {
+    return req.headers['x-wa-account-id'] || req.body?.wa_account_id || req.query?.wa_account_id;
+}
 
 app.get('/', (req, res) => {
     res.send('WhatsApp AI Bot (Gemini) backend is running ✅');
 });
 // POST /kb/add-text { title, text }
-app.post('/kb/add-text', async (req, res) => {
+app.post('/kb/add-text', requireAuth, requireRole(['owner', 'admin']), async (req, res) => {
     try {
         const { title, text } = req.body;
         if (!title || !text) {
             return res.status(400).json({ error: 'title and text are required' });
         }
 
-        const addedChunks = await addTextToKB(title, text);
+        const waAccountId = getWaAccountId(req);
+        if (!waAccountId) {
+            return res.status(400).json({ error: 'wa_account_id header or body is required' });
+        }
+
+        const addedChunks = await addTextToKB(title, text, waAccountId);
 
         return res.json({ ok: true, addedChunks });
     } catch (error) {
@@ -60,7 +71,7 @@ app.post('/kb/add-text', async (req, res) => {
 
 // POST /kb/upload-pdf
 // Expects: multipart/form-data with field "file" (PDF) and optional "title"
-app.post('/kb/upload-pdf', upload.single('file'), async (req, res) => {
+app.post('/kb/upload-pdf', requireAuth, requireRole(['owner', 'admin']), upload.single('file'), async (req, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ ok: false, error: 'No file uploaded' });
@@ -74,11 +85,17 @@ app.post('/kb/upload-pdf', upload.single('file'), async (req, res) => {
         (req.body && req.body.title) ||
         req.file.originalname.replace(/\.pdf$/i, '') ||
         'Untitled PDF';
+
+      const waAccountId = getWaAccountId(req);
+      if (!waAccountId) {
+        return res.status(400).json({ ok: false, error: 'wa_account_id header or body is required' });
+      }
   
       console.log('📄 Received PDF for KB:', {
         filename: req.file.originalname,
         size: req.file.size,
         title,
+        waAccountId,
       });
   
       // Extract text from PDF buffer using PDFParse class
@@ -91,7 +108,7 @@ app.post('/kb/upload-pdf', upload.single('file'), async (req, res) => {
       }
   
       // Reuse helper to chunk + embed + save
-      const addedChunks = await addTextToKB(title, text);
+      const addedChunks = await addTextToKB(title, text, waAccountId);
   
       return res.json({
         ok: true,
@@ -155,7 +172,7 @@ waClient.on('message', async (msg) => {
         }
 
         // Generate AI reply using Gemini
-        const kbMatches = await searchKB(text, 3);
+        const kbMatches = await searchKB(text, { topK: 3 });
         const aiReply = await generateAIReply({
             userMessage: text,
             kbMatches,

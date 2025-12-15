@@ -44,7 +44,7 @@ function chunkText(text, maxLen = 800) {
 }
 
 // Common helper: take a big text, embed chunks, append to kb.json
-async function addTextToKB(title, text) {
+async function addTextToKB(title, text, waAccountId) {
     const kb = loadKB();
     const chunks = chunkText(text);
     let added = 0;
@@ -56,6 +56,7 @@ async function addTextToKB(title, text) {
   
       kb.chunks.push({
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        wa_account_id: waAccountId || null,
         title,
         text: chunk,
         embedding,

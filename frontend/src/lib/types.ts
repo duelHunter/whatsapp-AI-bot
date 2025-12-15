@@ -16,3 +16,17 @@ export interface KbUploadPdfResponse {
   error?: string;
 }
 
+export type WaRole = "owner" | "admin" | "operator" | "viewer";
+
+export interface Membership {
+  wa_account_id: string;
+  role: WaRole;
+}
+
+export interface WaAccount {
+  id: string;
+  display_name?: string | null;
+  phone?: string | null;
+  role?: WaRole;
+}
+

@@ -1,12 +1,9 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
-import { apiPost, apiPostForm, API_BASE } from "@/lib/api";
-import type {
-  KbAddTextRequest,
-  KbAddTextResponse,
-  KbUploadPdfResponse,
-} from "@/lib/types";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { API_BASE } from "@/lib/api";
+import { backendPostForm, backendPostJson, getSelectedWaAccountId } from "@/lib/backendClient";
+import type { KbAddTextRequest, KbAddTextResponse, KbUploadPdfResponse } from "@/lib/types";
 
 type Status =
   | { state: "idle"; message?: string }
@@ -27,12 +24,17 @@ export default function KnowledgeBasePage() {
     state: "idle",
     message: "",
   });
+  const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
   const [pdfTitle, setPdfTitle] = useState("");
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>({
     state: "idle",
     message: "",
   });
+
+  useEffect(() => {
+    setSelectedAccount(getSelectedWaAccountId());
+  }, []);
 
   const isDisabled = useMemo(
     () => !form.title.trim() || form.text.trim().length < 20,
@@ -41,10 +43,15 @@ export default function KnowledgeBasePage() {
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!selectedAccount) {
+      setStatus({ state: "error", message: "Select a WhatsApp account first." });
+      return;
+    }
     setStatus({ state: "loading", message: "Uploading and embedding..." });
 
     try {
-      const result = await apiPost<KbAddTextResponse>("/kb/add-text", form);
+      const body = { ...form, wa_account_id: selectedAccount };
+      const result = await backendPostJson<KbAddTextResponse>("/kb/add-text", body, selectedAccount);
       setStatus({
         state: "success",
         message: "Added to knowledge base",
@@ -64,14 +71,19 @@ export default function KnowledgeBasePage() {
   const handlePdfSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!pdfFile) return;
+    if (!selectedAccount) {
+      setUploadStatus({ state: "error", message: "Select a WhatsApp account first." });
+      return;
+    }
     setUploadStatus({ state: "loading", message: "Uploading and parsing PDF..." });
 
     try {
       const fd = new FormData();
       fd.append("file", pdfFile);
       if (pdfTitle.trim()) fd.append("title", pdfTitle.trim());
+      fd.append("wa_account_id", selectedAccount);
 
-      const result = await apiPostForm<KbUploadPdfResponse>("/kb/upload-pdf", fd);
+      const result = await backendPostForm<KbUploadPdfResponse>("/kb/upload-pdf", fd, selectedAccount);
 
       if (!result.ok) {
         throw new Error(result.error || "Upload failed");
@@ -107,6 +119,9 @@ export default function KnowledgeBasePage() {
           <h1 className="text-3xl font-semibold tracking-tight text-white">
             Manage Knowledge Base
           </h1>
+          <p className="text-sm text-emerald-300">
+            Selected WhatsApp account: {selectedAccount ?? "none (select in Accounts page)"}
+          </p>
           <p className="max-w-3xl text-slate-400">
             Upload business content so the chatbot can ground responses with
             relevant snippets before calling Gemini. Text is chunked and
