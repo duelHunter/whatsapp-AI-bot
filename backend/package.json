@@ -18,7 +18,9 @@
     "express": "^5.2.1",
     "multer": "^2.0.2",
     "pdf-parse": "^2.4.5",
+    "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
+    "socket.io": "^4.8.1",
     "whatsapp-web.js": "^1.34.2"
   },
   "devDependencies": {
