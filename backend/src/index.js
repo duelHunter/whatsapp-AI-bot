@@ -149,8 +149,8 @@ process.on('uncaughtException', (error) => {
         console.warn('⚠️ File lock error during logout cleanup (Windows issue) - ignoring:', error.message);
         // This is a known Windows issue where files are locked during cleanup
         // The session will be cleared on next startup, so we can safely ignore this
-        return;
-    }
+            return;
+        }
     // Re-throw other uncaught exceptions
     throw error;
 });

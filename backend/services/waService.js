@@ -3,6 +3,7 @@ const qrcode = require('qrcode-terminal');
 const QRCode = require('qrcode');
 const fs = require('fs');
 const path = require('path');
+const { supabaseAdmin } = require('../src/auth/supabase');
 
 /**
  * WhatsApp Service
@@ -262,6 +263,26 @@ class WhatsAppService {
     async handleMessage(msg) {
         try {
             console.log(`💬 From ${msg.from}: ${msg.body}`);
+
+            //testing supabase database connection
+            // insert messages into messages table
+            const now = new Date().toISOString();       
+            const { data, error } = await supabaseAdmin.from('messages').insert({
+            org_id: '123',
+            conversation_id: '123',
+            wa_account_id: '123',
+            direction: 'inbound',
+            sender_type: 'user',
+            wa_message_id: "sample_message_id",
+            body: msg.body,
+            created_at: now,
+            });
+            if (error) {
+                console.error('❌ Error inserting message:', error);
+            } else {
+                console.log('✅ Message inserted:', data);
+            }
+                ///////////////////////////////
 
             const text = msg.body?.trim();
             if (!text) return;
