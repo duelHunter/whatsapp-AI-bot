@@ -23,13 +23,13 @@ create table public.profiles (
 
 # Memberships
 ```
-create type public.user_role as enum ('owner', 'admin', 'agent', 'viewer');
+create type public.user_role as enum ('owner', 'admin', 'operator', 'viewer');
 
 create table public.memberships (
   id uuid primary key default gen_random_uuid(),
   org_id uuid not null references public.organizations(id) on delete cascade,
   user_id uuid not null references public.profiles(id) on delete cascade,
-  role public.user_role not null default 'agent',
+  role public.user_role not null default 'operator',
   created_at timestamptz default now(),
   unique (org_id, user_id)
 );
@@ -53,7 +53,8 @@ create table public.whatsapp_accounts (
 ```
 
 # Contacts
-```create table public.contacts (
+```
+create table public.contacts (
   id uuid primary key default gen_random_uuid(),
   org_id uuid not null references public.organizations(id) on delete cascade,
   wa_account_id uuid not null references public.whatsapp_accounts(id) on delete cascade,

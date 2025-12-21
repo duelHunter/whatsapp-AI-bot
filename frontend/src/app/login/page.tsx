@@ -31,8 +31,8 @@ export default function LoginPage() {
       if (data.session) {
         // Store the access token in a cookie for middleware
         document.cookie = `sb-access-token=${data.session.access_token}; path=/; max-age=${data.session.expires_in}; SameSite=Lax`;
-        // Redirect to dashboard
-        router.push("/dashboard");
+        // Redirect to home (dashboard)
+        router.push("/");
         router.refresh();
       }
     } catch (err) {
