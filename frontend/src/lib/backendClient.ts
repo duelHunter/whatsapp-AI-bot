@@ -81,4 +81,10 @@ export async function backendPostForm<T>(
   return authFetch(path, { method: "POST", body: formData, isForm: true, waAccountId });
 }
 
+export async function backendGet<T>(
+  path: string,
+  waAccountId?: string | null
+): Promise<T> {
+  return authFetch(path, { method: "GET", waAccountId });
+}
 

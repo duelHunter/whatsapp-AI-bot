@@ -37,7 +37,7 @@ app.use(
     })
 );
 // Preflight for known routes (avoid path-to-regexp wildcard crash)
-app.options(['/', '/kb/add-text', '/kb/upload-pdf'], cors({ origin: origins }));
+app.options(['/', '/kb/add-text', '/kb/upload-pdf', '/api/conversations', '/api/messages'], cors({ origin: origins }));
 
 app.use(express.json());
 
@@ -47,6 +47,125 @@ function getWaAccountId(req) {
 
 app.get('/', (req, res) => {
     res.send('WhatsApp AI Bot (Gemini) backend is running ✅');
+});
+
+// GET /api/conversations - Get all conversations for the user's organization
+app.get('/api/conversations', requireAuth, async (req, res) => {
+    try {
+        const waAccountId = getWaAccountId(req);
+        if (!waAccountId) {
+            return res.status(400).json({ error: 'wa_account_id header or query is required' });
+        }
+
+        const { supabaseAdmin } = require('./auth/supabase');
+        if (!supabaseAdmin) {
+            return res.status(500).json({ error: 'Database not configured' });
+        }
+
+        // Get user's organization from memberships
+        const { data: memberships, error: membershipError } = await supabaseAdmin
+            .from('memberships')
+            .select('org_id')
+            .eq('user_id', req.auth.user.id)
+            .limit(1)
+            .maybeSingle();
+
+        if (membershipError || !memberships) {
+            return res.status(403).json({ error: 'User is not a member of any organization' });
+        }
+
+        const orgId = memberships.org_id;
+
+        // Fetch conversations with contact details
+        const { data: conversations, error: convError } = await supabaseAdmin
+            .from('conversations')
+            .select(`
+                id,
+                status,
+                last_message_at,
+                last_message_preview,
+                created_at,
+                contacts:contact_id (
+                    id,
+                    wa_number,
+                    name
+                )
+            `)
+            .eq('org_id', orgId)
+            .eq('wa_account_id', waAccountId)
+            .order('last_message_at', { ascending: false, nullsFirst: false })
+            .order('created_at', { ascending: false });
+
+        if (convError) {
+            console.error('❌ Error fetching conversations:', convError);
+            return res.status(500).json({ error: 'Failed to fetch conversations' });
+        }
+
+        return res.json({ ok: true, conversations: conversations || [] });
+    } catch (error) {
+        console.error('❌ Error in /api/conversations:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// GET /api/messages/:conversationId - Get messages for a specific conversation
+app.get('/api/messages/:conversationId', requireAuth, async (req, res) => {
+    try {
+        const { conversationId } = req.params;
+        const waAccountId = getWaAccountId(req);
+        if (!waAccountId) {
+            return res.status(400).json({ error: 'wa_account_id header or query is required' });
+        }
+
+        const { supabaseAdmin } = require('./auth/supabase');
+        if (!supabaseAdmin) {
+            return res.status(500).json({ error: 'Database not configured' });
+        }
+
+        // Get user's organization from memberships
+        const { data: memberships, error: membershipError } = await supabaseAdmin
+            .from('memberships')
+            .select('org_id')
+            .eq('user_id', req.auth.user.id)
+            .limit(1)
+            .maybeSingle();
+
+        if (membershipError || !memberships) {
+            return res.status(403).json({ error: 'User is not a member of any organization' });
+        }
+
+        const orgId = memberships.org_id;
+
+        // Verify conversation belongs to user's org and wa_account
+        const { data: conversation, error: convCheckError } = await supabaseAdmin
+            .from('conversations')
+            .select('id, org_id, wa_account_id')
+            .eq('id', conversationId)
+            .eq('org_id', orgId)
+            .eq('wa_account_id', waAccountId)
+            .single();
+
+        if (convCheckError || !conversation) {
+            return res.status(404).json({ error: 'Conversation not found' });
+        }
+
+        // Fetch messages
+        const { data: messages, error: messagesError } = await supabaseAdmin
+            .from('messages')
+            .select('*')
+            .eq('conversation_id', conversationId)
+            .order('created_at', { ascending: true });
+
+        if (messagesError) {
+            console.error('❌ Error fetching messages:', messagesError);
+            return res.status(500).json({ error: 'Failed to fetch messages' });
+        }
+
+        return res.json({ ok: true, messages: messages || [] });
+    } catch (error) {
+        console.error('❌ Error in /api/messages:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 });
 // POST /kb/add-text { title, text }
 app.post('/kb/add-text', requireAuth, requireRole(['owner', 'admin']), async (req, res) => {
