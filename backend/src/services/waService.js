@@ -249,6 +249,11 @@ class WhatsAppService {
 
         // Message event
         this.client.on('message', async (msg) => {
+            // Ignore status updates and group chats
+            const isStatus = msg.from === 'status@broadcast';
+            const isPrivateChat = msg.from.endsWith('@c.us');
+        
+            if (!isPrivateChat || isStatus) return;
             await this.handleMessage(msg);
         });
     }
