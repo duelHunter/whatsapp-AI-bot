@@ -743,7 +743,7 @@ class WhatsAppService {
                 .select('direction, body, sender_type')
                 .eq('conversation_id', conversationId)
                 .order('created_at', { ascending: false })
-                .limit(20);
+                .limit(10);
 
             const conversationHistory = (recentMessages || [])
                 .filter(m => m.body)
