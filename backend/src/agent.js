@@ -78,7 +78,7 @@ const tools = [
                     quantity: { type: 'integer', description: 'Number of copies to add (default 1)' },
                 },
                 required: ['book_id'],
-            },
+            }, 
         },
     },
     {
@@ -173,8 +173,13 @@ async function executeTool(name, args, ctx) {
     const startTime = Date.now();
     try {
         switch (name) {
-            case 'search_books':
-                return { books: await orderService.searchBooks(ctx.orgId, args.query, args.category) };
+            case 'search_books': {
+                const books = await orderService.searchBooks(ctx.orgId, args.query, args.category);
+                if (!books || books.length === 0) {
+                    return { books: [], message: `No books found matching "${args.query}"${args.category ? ` in category "${args.category}"` : ''}. Do not search again with the same query. Tell the customer this title is not available in our catalog.` };
+                }
+                return { books };
+            }
 
             case 'get_book_details':
                 return await orderService.getBookDetails(ctx.orgId, args.book_id) || { error: 'Book not found' };
@@ -246,6 +251,7 @@ async function runAgent({ conversationHistory, userMessage, toolContext, returnT
     const messages = [
         { role: 'system', content: AGENT_SYSTEM_PROMPT },
     ];
+    console.log('📝 Conversation history:', conversationHistory?.map(msg => ({ role: msg.role, content: msg.content }))); //for debugging
 
     // Add conversation history (already in OpenAI format)
     for (const msg of (conversationHistory || [])) {

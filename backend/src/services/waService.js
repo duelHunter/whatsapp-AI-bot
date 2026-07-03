@@ -737,12 +737,12 @@ class WhatsAppService {
                 }
             }
 
-            // Build conversation history from DB
+            // Build conversation history from DB (get last 20 messages for context)
             const { data: recentMessages } = await supabaseAdmin
                 .from('messages')
                 .select('direction, body, sender_type')
                 .eq('conversation_id', conversationId)
-                .order('created_at', { ascending: true })
+                .order('created_at', { ascending: false })
                 .limit(20);
 
             const conversationHistory = (recentMessages || [])
