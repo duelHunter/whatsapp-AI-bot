@@ -1,12 +1,12 @@
 require('dotenv').config();
-const Groq = require('groq-sdk');
+const axios = require('axios');
 const orderService = require('./services/orderService');
 const { searchKB } = require('./rag');
 
-const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
+const NVIDIA_MODEL = process.env.NVIDIA_MODEL || 'mistralai/mistral-medium-3.5-128b';
+const NVIDIA_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
 const MAX_TOOL_ITERATIONS = 10;
-
-const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
 
 const AGENT_SYSTEM_PROMPT = `You are a friendly and helpful bookstore assistant on WhatsApp. You help customers browse books, manage their shopping cart, and place orders.
 
@@ -239,53 +239,54 @@ async function executeTool(name, args, ctx) {
     }
 }
 
+async function nvidiaChat(messages, useTools = true) {
+    const payload = {
+        model: NVIDIA_MODEL,
+        messages,
+        reasoning_effort: 'high',
+        temperature: 0.7,
+        top_p: 1.0,
+        max_tokens: 4096,
+        stream: false,
+    };
+    if (useTools) {
+        payload.tools = tools;
+        payload.tool_choice = 'auto';
+    }
+    const response = await axios.post(NVIDIA_URL, payload, {
+        headers: {
+            Authorization: `Bearer ${NVIDIA_API_KEY}`,
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+        },
+    });
+    return response.data;
+}
+
 async function runAgent({ conversationHistory, userMessage, toolContext, returnToolLogs = false }) {
-    if (!groq) {
-        const errMsg = "AI Error: Groq API key not configured.";
+    if (!NVIDIA_API_KEY) {
+        const errMsg = "AI Error: NVIDIA_API_KEY not configured.";
         return returnToolLogs ? { reply: errMsg, toolLogs: [] } : errMsg;
     }
 
     const toolLogs = [];
 
-    // Build messages array from conversation history
     const messages = [
         { role: 'system', content: AGENT_SYSTEM_PROMPT },
     ];
-    console.log('📝 Conversation history:', conversationHistory?.map(msg => ({ role: msg.role, content: msg.content }))); //for debugging
 
-    // Add conversation history (already in OpenAI format)
     for (const msg of (conversationHistory || [])) {
         if (msg.content) {
             messages.push({ role: msg.role, content: msg.content });
         }
     }
 
-    // Add current user message
     messages.push({ role: 'user', content: userMessage });
 
     let iterations = 0;
-    let retries = 0;
-    const MAX_RETRIES = 2;
 
     while (iterations < MAX_TOOL_ITERATIONS) {
-        let completion;
-        try {
-            completion = await groq.chat.completions.create({
-                model: GROQ_MODEL,
-                messages,
-                tools,
-                tool_choice: 'auto',
-                temperature: 0.7,
-                max_tokens: 1024,
-            });
-        } catch (err) {
-            if (err.status === 400 && err.error?.error?.code === 'tool_use_failed' && retries < MAX_RETRIES) {
-                retries++;
-                console.warn(`⚠️ Groq tool_use_failed, retry ${retries}/${MAX_RETRIES}`);
-                continue;
-            }
-            throw err;
-        }
+        const completion = await nvidiaChat(messages, true);
 
         const choice = completion.choices?.[0];
         if (!choice) break;
@@ -293,15 +294,12 @@ async function runAgent({ conversationHistory, userMessage, toolContext, returnT
         const responseMessage = choice.message;
         messages.push(responseMessage);
 
-        // If no tool calls, we have the final response
         if (!responseMessage.tool_calls || responseMessage.tool_calls.length === 0) {
             const reply = responseMessage.content?.trim() || "I'm sorry, I couldn't process that request. Please try again.";
             return returnToolLogs ? { reply, toolLogs } : reply;
         }
 
-        // Process tool calls
         iterations++;
-        retries = 0;
         console.log(`🔧 Agent tool call iteration ${iterations}:`, responseMessage.tool_calls.map(tc => tc.function.name));
 
         for (const toolCall of responseMessage.tool_calls) {
@@ -314,7 +312,6 @@ async function runAgent({ conversationHistory, userMessage, toolContext, returnT
             }
 
             const result = await executeTool(name, args, toolContext);
-
             toolLogs.push({ tool: name, args, result });
 
             messages.push({
@@ -329,14 +326,7 @@ async function runAgent({ conversationHistory, userMessage, toolContext, returnT
         console.warn('⚠️ Agent reached max tool iterations');
     }
 
-    // Get final response after all tool calls
-    const finalCompletion = await groq.chat.completions.create({
-        model: GROQ_MODEL,
-        messages,
-        temperature: 0.7,
-        max_tokens: 1024,
-    });
-
+    const finalCompletion = await nvidiaChat(messages, false);
     const reply = finalCompletion.choices?.[0]?.message?.content?.trim() || "I'm sorry, I couldn't process that request. Please try again.";
     return returnToolLogs ? { reply, toolLogs } : reply;
 }

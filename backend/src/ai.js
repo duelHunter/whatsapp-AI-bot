@@ -1,22 +1,24 @@
 // backend/src/ai.js
 
 require('dotenv').config();
-const Groq = require('groq-sdk');
+const axios = require('axios');
 const { InferenceClient } = require('@huggingface/inference');
 
-const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
+const NVIDIA_MODEL = process.env.NVIDIA_MODEL || 'mistralai/mistral-medium-3.5-128b';
 const HF_EMBED_MODEL = process.env.HF_EMBED_MODEL || "BAAI/bge-base-en-v1.5";
 
-const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
+const NVIDIA_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
+
 const hfClient = process.env.HF_API_TOKEN ? new InferenceClient(process.env.HF_API_TOKEN) : null;
 
-if (!groq) {
-  console.error("❌ Missing GROQ_API_KEY in .env");
+if (!NVIDIA_API_KEY) {
+  console.error("❌ Missing NVIDIA_API_KEY in .env");
   process.exit(1);
 }
 
 /**
- * Generate a natural language reply using KB snippets via Groq (Llama 3.3 70B).
+ * Generate a natural language reply using KB snippets via NVIDIA (Mistral Medium 3.5).
  */
 async function generateAIReply({
   userMessage,
@@ -35,22 +37,30 @@ async function generateAIReply({
       ? `Use these knowledge base snippets when relevant:\n\n${kbContext}\n\nUser question:\n${userMessage}`
       : `No knowledge base snippets were retrieved.\n\nUser question:\n${userMessage}`;
 
-    const completion = await groq.chat.completions.create({
-      model: GROQ_MODEL,
+    const response = await axios.post(NVIDIA_URL, {
+      model: NVIDIA_MODEL,
       messages: [
-        { role: "system", content: systemInstruction },
-        { role: "user", content: userPrompt },
+        { role: 'system', content: systemInstruction },
+        { role: 'user', content: userPrompt },
       ],
       temperature: 0.7,
+      top_p: 1.0,
       max_tokens: 1024,
+      stream: false,
+    }, {
+      headers: {
+        Authorization: `Bearer ${NVIDIA_API_KEY}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
     });
 
-    const output = completion.choices?.[0]?.message?.content?.trim() ||
+    const output = response.data?.choices?.[0]?.message?.content?.trim() ||
       "I'm not sure, could you rephrase?";
 
     return output;
   } catch (err) {
-    console.error("❌ generateAIReply Error:", err);
+    console.error("❌ generateAIReply Error:", err?.response?.data || err.message);
     return "AI Error: Something went wrong while generating a reply.";
   }
 }
