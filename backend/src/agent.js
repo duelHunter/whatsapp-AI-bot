@@ -3,9 +3,9 @@ const axios = require('axios');
 const orderService = require('./services/orderService');
 const { searchKB } = require('./rag');
 
-const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
-const NVIDIA_MODEL = process.env.NVIDIA_MODEL || 'mistralai/mistral-medium-3.5-128b';
-const NVIDIA_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
+const AI_API_KEY = process.env.AI_API_KEY || 'ollama';
+const AI_MODEL = process.env.AI_MODEL || 'qwen3-coder:30b';
+const AI_URL = process.env.AI_BASE_URL || 'http://127.0.0.1:11434/v1/chat/completions';
 const MAX_TOOL_ITERATIONS = 10;
 
 const AGENT_SYSTEM_PROMPT = `You are a friendly and helpful bookstore assistant on WhatsApp. You help customers browse books, manage their shopping cart, and place orders.
@@ -174,6 +174,7 @@ async function executeTool(name, args, ctx) {
     try {
         switch (name) {
             case 'search_books': {
+                console.log(`🔍 search_books orgId: ${ctx.orgId}`);
                 const books = await orderService.searchBooks(ctx.orgId, args.query, args.category);
                 if (!books || books.length === 0) {
                     return { books: [], message: `No books found matching "${args.query}"${args.category ? ` in category "${args.category}"` : ''}. Do not search again with the same query. Tell the customer this title is not available in our catalog.` };
@@ -239,23 +240,22 @@ async function executeTool(name, args, ctx) {
     }
 }
 
-async function nvidiaChat(messages, useTools = true) {
+async function llmChat(messages, useTools = true) {
     const payload = {
-        model: NVIDIA_MODEL,
+        model: AI_MODEL,
         messages,
-        reasoning_effort: 'high',
         temperature: 0.7,
         top_p: 1.0,
-        max_tokens: 4096,
+        max_tokens: 1024,
         stream: false,
     };
     if (useTools) {
         payload.tools = tools;
         payload.tool_choice = 'auto';
     }
-    const response = await axios.post(NVIDIA_URL, payload, {
+    const response = await axios.post(AI_URL, payload, {
         headers: {
-            Authorization: `Bearer ${NVIDIA_API_KEY}`,
+            Authorization: `Bearer ${AI_API_KEY}`,
             'Content-Type': 'application/json',
             Accept: 'application/json',
         },
@@ -264,8 +264,8 @@ async function nvidiaChat(messages, useTools = true) {
 }
 
 async function runAgent({ conversationHistory, userMessage, toolContext, returnToolLogs = false }) {
-    if (!NVIDIA_API_KEY) {
-        const errMsg = "AI Error: NVIDIA_API_KEY not configured.";
+    if (!AI_API_KEY) {
+        const errMsg = "AI Error: AI_API_KEY not configured.";
         return returnToolLogs ? { reply: errMsg, toolLogs: [] } : errMsg;
     }
 
@@ -286,7 +286,7 @@ async function runAgent({ conversationHistory, userMessage, toolContext, returnT
     let iterations = 0;
 
     while (iterations < MAX_TOOL_ITERATIONS) {
-        const completion = await nvidiaChat(messages, true);
+        const completion = await llmChat(messages, true);
 
         const choice = completion.choices?.[0];
         if (!choice) break;
@@ -326,7 +326,7 @@ async function runAgent({ conversationHistory, userMessage, toolContext, returnT
         console.warn('⚠️ Agent reached max tool iterations');
     }
 
-    const finalCompletion = await nvidiaChat(messages, false);
+    const finalCompletion = await llmChat(messages, false);
     const reply = finalCompletion.choices?.[0]?.message?.content?.trim() || "I'm sorry, I couldn't process that request. Please try again.";
     return returnToolLogs ? { reply, toolLogs } : reply;
 }

@@ -4,18 +4,12 @@ require('dotenv').config();
 const axios = require('axios');
 const { InferenceClient } = require('@huggingface/inference');
 
-const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
-const NVIDIA_MODEL = process.env.NVIDIA_MODEL || 'mistralai/mistral-medium-3.5-128b';
+const AI_API_KEY = process.env.AI_API_KEY || 'ollama';
+const AI_MODEL = process.env.AI_MODEL || 'qwen3-coder:30b';
+const AI_URL = process.env.AI_BASE_URL || 'http://127.0.0.1:11434/v1/chat/completions';
 const HF_EMBED_MODEL = process.env.HF_EMBED_MODEL || "BAAI/bge-base-en-v1.5";
 
-const NVIDIA_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
-
 const hfClient = process.env.HF_API_TOKEN ? new InferenceClient(process.env.HF_API_TOKEN) : null;
-
-if (!NVIDIA_API_KEY) {
-  console.error("❌ Missing NVIDIA_API_KEY in .env");
-  process.exit(1);
-}
 
 /**
  * Generate a natural language reply using KB snippets via NVIDIA (Mistral Medium 3.5).
@@ -37,8 +31,8 @@ async function generateAIReply({
       ? `Use these knowledge base snippets when relevant:\n\n${kbContext}\n\nUser question:\n${userMessage}`
       : `No knowledge base snippets were retrieved.\n\nUser question:\n${userMessage}`;
 
-    const response = await axios.post(NVIDIA_URL, {
-      model: NVIDIA_MODEL,
+    const response = await axios.post(AI_URL, {
+      model: AI_MODEL,
       messages: [
         { role: 'system', content: systemInstruction },
         { role: 'user', content: userPrompt },
@@ -49,7 +43,7 @@ async function generateAIReply({
       stream: false,
     }, {
       headers: {
-        Authorization: `Bearer ${NVIDIA_API_KEY}`,
+        Authorization: `Bearer ${AI_API_KEY}`,
         'Content-Type': 'application/json',
         Accept: 'application/json',
       },
