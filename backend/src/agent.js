@@ -4,7 +4,7 @@ const orderService = require('./services/orderService');
 const { searchKB } = require('./rag');
 
 const AI_API_KEY = process.env.AI_API_KEY || 'ollama';
-const AI_MODEL = process.env.AI_MODEL || 'qwen3-coder:30b';
+const AI_MODEL = process.env.AI_MODEL || 'gemma4:latest';
 const AI_URL = process.env.AI_BASE_URL || 'http://127.0.0.1:11434/v1/chat/completions';
 const MAX_TOOL_ITERATIONS = 10;
 
@@ -253,6 +253,7 @@ async function llmChat(messages, useTools = true) {
         payload.tools = tools;
         payload.tool_choice = 'auto';
     }
+    console.log('📤 LLM request payload:', JSON.stringify(payload, null, 2));
     const response = await axios.post(AI_URL, payload, {
         headers: {
             Authorization: `Bearer ${AI_API_KEY}`,
@@ -260,6 +261,7 @@ async function llmChat(messages, useTools = true) {
             Accept: 'application/json',
         },
     });
+    console.log('📥 LLM response:', JSON.stringify(response.data, null, 2));
     return response.data;
 }
 
@@ -275,12 +277,20 @@ async function runAgent({ conversationHistory, userMessage, toolContext, returnT
         { role: 'system', content: AGENT_SYSTEM_PROMPT },
     ];
 
+    // GUARDRAIL: sanitize history before handing it to the model —
+    // drop a leading orphan (a turn whose partner got cut off by the fetch window,
+    // e.g. history starting with 'assistant' with no preceding 'user'), and collapse
+    // consecutive duplicate turns (same role + content, e.g. a message processed twice).
+    //this helps to llm understand the context better and avoid confusion or repetition in its responses.
+    const sanitizedHistory = [];
     for (const msg of (conversationHistory || [])) {
-        if (msg.content) {
-            messages.push({ role: msg.role, content: msg.content });
-        }
+        if (!msg.content) continue;
+        if (sanitizedHistory.length === 0 && msg.role !== 'user') continue;
+        const prev = sanitizedHistory[sanitizedHistory.length - 1];
+        if (prev && prev.role === msg.role && prev.content === msg.content) continue;
+        sanitizedHistory.push({ role: msg.role, content: msg.content });
     }
-
+    messages.push(...sanitizedHistory);
     messages.push({ role: 'user', content: userMessage });
 
     let iterations = 0;
@@ -292,10 +302,30 @@ async function runAgent({ conversationHistory, userMessage, toolContext, returnT
         if (!choice) break;
 
         const responseMessage = choice.message;
+
+        // GUARDRAIL: model emitted the tool call as text instead of structured tool_calls —
+        // parse it out and treat it as a real tool call rather than leaking it to the customer.
+        if ((!responseMessage.tool_calls || responseMessage.tool_calls.length === 0) && FAKE_TOOL_CALL_PATTERN.test(responseMessage.content || '')) {
+            const fallbackCalls = parseFallbackToolCalls(responseMessage.content);
+            if (fallbackCalls.length > 0) {
+                console.warn('⚠️ Model emitted tool call as text, using fallback parser:', fallbackCalls.map(c => c.name));
+                responseMessage.tool_calls = fallbackCalls.map((c, i) => ({
+                    id: `fallback_${Date.now()}_${i}`,
+                    function: { name: c.name, arguments: JSON.stringify(c.arguments) },
+                }));
+                responseMessage.content = null;
+            }
+        }
+
         messages.push(responseMessage);
 
         if (!responseMessage.tool_calls || responseMessage.tool_calls.length === 0) {
-            const reply = responseMessage.content?.trim() || "I'm sorry, I couldn't process that request. Please try again.";
+            let reply = responseMessage.content?.trim() || "I'm sorry, I couldn't process that request. Please try again.";
+            // GUARDRAIL: never let leaked internal/tool syntax reach the customer.
+            if (containsLeakedInternalSyntax(reply)) {
+                console.warn('⚠️ Blocked reply containing leaked internal syntax:', reply);
+                reply = "Sorry, I had trouble processing that. Could you rephrase your request?";
+            }
             return returnToolLogs ? { reply, toolLogs } : reply;
         }
 
@@ -327,7 +357,12 @@ async function runAgent({ conversationHistory, userMessage, toolContext, returnT
     }
 
     const finalCompletion = await llmChat(messages, false);
-    const reply = finalCompletion.choices?.[0]?.message?.content?.trim() || "I'm sorry, I couldn't process that request. Please try again.";
+    let reply = finalCompletion.choices?.[0]?.message?.content?.trim() || "I'm sorry, I couldn't process that request. Please try again.";
+    // GUARDRAIL: same leaked-syntax check applies to the max-iterations fallback path.
+    if (containsLeakedInternalSyntax(reply)) {
+        console.warn('⚠️ Blocked reply containing leaked internal syntax:', reply);
+        reply = "Sorry, I had trouble processing that. Could you rephrase your request?";
+    }
     return returnToolLogs ? { reply, toolLogs } : reply;
 }
 

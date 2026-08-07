@@ -27,6 +27,10 @@ class WhatsAppService {
         this.waAccountId = null;
         // Track recently sent bot messages to avoid duplicate DB entries
         this.recentlySentMsgIds = new Set();
+        // GUARDRAIL: track recently processed incoming message ids to avoid double-handling
+        // the same customer message if whatsapp-web.js ever fires message_create twice for it
+        // (seen in practice — causes duplicate consecutive history entries and duplicate replies)
+        this.recentlyProcessedIncomingIds = new Set();
         // Whether the bot should auto-reply (admin-toggleable, persisted in DB)
         this.botEnabled = true;
     }
@@ -524,6 +528,21 @@ class WhatsAppService {
                 return;
             }
 
+            // GUARDRAIL: skip if we've already processed this exact incoming message id
+            // (message_create can occasionally fire more than once for the same message)
+            const incomingId = msg.id?._serialized;
+            if (incomingId) {
+                if (this.recentlyProcessedIncomingIds.has(incomingId)) {
+                    console.warn('⚠️ Duplicate incoming message id, skipping:', incomingId);
+                    return;
+                }
+                this.recentlyProcessedIncomingIds.add(incomingId);
+                if (this.recentlyProcessedIncomingIds.size > 500) {
+                    const oldest = this.recentlyProcessedIncomingIds.values().next().value;
+                    this.recentlyProcessedIncomingIds.delete(oldest);
+                }
+            }
+
             // -- AT THIS POINT WE KNOW IT'S AN INCOMING MESSAGE FROM A CUSTOMER --
 
             // Get contact info
@@ -745,8 +764,11 @@ class WhatsAppService {
                 .order('created_at', { ascending: false })
                 .limit(10);
 
+            // recentMessages is fetched newest-first (DESC) — reverse to chronological
+            // (oldest first) order before handing it to the LLM.
             const conversationHistory = (recentMessages || [])
                 .filter(m => m.body)
+                .reverse()
                 .map(m => ({
                     role: m.direction === 'inbound' ? 'user' : 'assistant',
                     content: m.body,
@@ -770,7 +792,11 @@ class WhatsAppService {
 
             if (this.orgId && this.waAccountId) {
                 if (sentMsg) this.recentlySentMsgIds.add(sentMsg.id._serialized);
-                saveOutgoingMessage({
+                // Awaited (not fire-and-forget): the next incoming message's history fetch
+                // must not race ahead of this reply being committed, or it ends up
+                // missing from that turn's conversationHistory and shows up misaligned
+                // one turn later.
+                await saveOutgoingMessage({
                     orgId: this.orgId,
                     waAccountId: this.waAccountId || this.orgId,
                     contactPhone,

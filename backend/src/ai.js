@@ -5,7 +5,7 @@ const axios = require('axios');
 const { InferenceClient } = require('@huggingface/inference');
 
 const AI_API_KEY = process.env.AI_API_KEY || 'ollama';
-const AI_MODEL = process.env.AI_MODEL || 'qwen3-coder:30b';
+const AI_MODEL = process.env.AI_MODEL || 'gemma4:latest';
 const AI_URL = process.env.AI_BASE_URL || 'http://127.0.0.1:11434/v1/chat/completions';
 const HF_EMBED_MODEL = process.env.HF_EMBED_MODEL || "BAAI/bge-base-en-v1.5";
 
@@ -31,7 +31,7 @@ async function generateAIReply({
       ? `Use these knowledge base snippets when relevant:\n\n${kbContext}\n\nUser question:\n${userMessage}`
       : `No knowledge base snippets were retrieved.\n\nUser question:\n${userMessage}`;
 
-    const response = await axios.post(AI_URL, {
+    const payload = {
       model: AI_MODEL,
       messages: [
         { role: 'system', content: systemInstruction },
@@ -41,13 +41,17 @@ async function generateAIReply({
       top_p: 1.0,
       max_tokens: 1024,
       stream: false,
-    }, {
+    };
+    console.log('📤 LLM request payload:', JSON.stringify(payload, null, 2));
+
+    const response = await axios.post(AI_URL, payload, {
       headers: {
         Authorization: `Bearer ${AI_API_KEY}`,
         'Content-Type': 'application/json',
         Accept: 'application/json',
       },
     });
+    console.log('📥 LLM response:', JSON.stringify(response.data, null, 2));
 
     const output = response.data?.choices?.[0]?.message?.content?.trim() ||
       "I'm not sure, could you rephrase?";
