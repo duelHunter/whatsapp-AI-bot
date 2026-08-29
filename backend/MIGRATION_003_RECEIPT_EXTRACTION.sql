@@ -9,4 +9,5 @@ ALTER TABLE public.payment_receipts
   ADD COLUMN IF NOT EXISTS extracted_date text,
   ADD COLUMN IF NOT EXISTS extracted_bank_name text,
   ADD COLUMN IF NOT EXISTS extraction_confidence text CHECK (extraction_confidence IN ('high', 'medium', 'low') OR extraction_confidence IS NULL),
-  ADD COLUMN IF NOT EXISTS extraction_notes text;
+  ADD COLUMN IF NOT EXISTS extraction_notes text,
+  ADD COLUMN IF NOT EXISTS extracted_raw_text text;

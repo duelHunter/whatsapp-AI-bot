@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { supabaseAdmin } = require('../auth/supabase');
 const { saveIncomingMessage, saveOutgoingMessage } = require('./messageStore');
-const { extractReceiptData } = require('./receiptVerification');
+const { extractReceiptDataOCR } = require('./receiptOcr');
 const {
     updateWhatsAppStatus,
     getFirstWhatsAppAccount
@@ -757,7 +757,8 @@ class WhatsAppService {
 
                         // Advisory only — extraction failures must never block receipt
                         // submission, they just leave the admin without an extraction hint.
-                        const extraction = await extractReceiptData(mediaBuffer, media?.mimetype)
+                        // OCR-based (local, no vision-model dependency) — see receiptOcr.js.
+                        const extraction = await extractReceiptDataOCR(mediaBuffer, media?.mimetype)
                             .catch(err => {
                                 console.error('❌ Receipt extraction threw unexpectedly:', err);
                                 return null;

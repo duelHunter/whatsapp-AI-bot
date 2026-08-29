@@ -916,7 +916,7 @@ app.get('/api/orders/:id/receipt', requireAuth, async (req, res) => {
             .from('payment_receipts')
             .select(`id, media_type, media_mime_type, media_data, status, created_at, notes,
                 extracted_amount, extracted_reference, extracted_date, extracted_bank_name,
-                extraction_confidence, extraction_notes`)
+                extraction_confidence, extraction_notes, extracted_raw_text`)
             .eq('order_id', req.params.id)
             .order('created_at', { ascending: false })
             .limit(1)

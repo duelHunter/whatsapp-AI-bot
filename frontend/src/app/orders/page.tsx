@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { backendGet, backendPostJson, backendPatch } from "@/lib/backendClient";
-import type { Order, OrderStatus } from "@/lib/types";
+import type { Order, OrderStatus, PaymentReceipt } from "@/lib/types";
 import { API_BASE } from "@/lib/api";
 import { getSelectedWaAccountId } from "@/lib/backendClient";
 import { supabaseClient } from "@/lib/supabaseClient";
@@ -53,6 +53,8 @@ export default function OrdersPage() {
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
+  const [receiptData, setReceiptData] = useState<PaymentReceipt | null>(null);
+  const [showRawText, setShowRawText] = useState(false);
 
   const limit = 20;
 
@@ -89,6 +91,8 @@ export default function OrdersPage() {
   const loadOrderDetail = async (orderId: string) => {
     setDetailLoading(true);
     setReceiptUrl(null);
+    setReceiptData(null);
+    setShowRawText(false);
     try {
       const res = await backendGet<{ ok: boolean; order: Order }>(`/api/orders/${orderId}`);
       if (res.ok) {
@@ -98,16 +102,18 @@ export default function OrdersPage() {
           res.order.status === "receipt_submitted" ||
           res.order.receipts?.some((r) => r.status === "pending")
         ) {
-          const receiptRes = await backendGet<{ ok: boolean; receipt: { has_media: boolean } }>(
+          const receiptRes = await backendGet<{ ok: boolean; receipt: PaymentReceipt }>(
             `/api/orders/${orderId}/receipt`
           );
-          if (receiptRes.ok && receiptRes.receipt?.has_media) {
-            const orgId = getSelectedWaAccountId();
-            const { data: session } = await supabaseClient.auth.getSession();
-            const token = session?.session?.access_token;
-            setReceiptUrl(
-              `${API_BASE}/api/orders/${orderId}/receipt?download=true&token=${token || ""}`
-            );
+          if (receiptRes.ok && receiptRes.receipt) {
+            setReceiptData(receiptRes.receipt);
+            if (receiptRes.receipt.has_media) {
+              const { data: session } = await supabaseClient.auth.getSession();
+              const token = session?.session?.access_token;
+              setReceiptUrl(
+                `${API_BASE}/api/orders/${orderId}/receipt?download=true&token=${token || ""}`
+              );
+            }
           }
         }
       }
@@ -339,6 +345,99 @@ export default function OrdersPage() {
                     />
                   </div>
                 )}
+
+                {/* OCR-extracted details — advisory only, verify against the image above */}
+                {receiptData && (
+                  <div className="mb-3 rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+                    <div className="mb-2 flex items-center justify-between">
+                      <h4 className="text-xs font-medium uppercase text-slate-400">
+                        OCR-Extracted Details
+                      </h4>
+                      {receiptData.extraction_confidence && (
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                            receiptData.extraction_confidence === "high"
+                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400"
+                              : receiptData.extraction_confidence === "medium"
+                              ? "bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400"
+                              : "bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-400"
+                          }`}
+                        >
+                          {receiptData.extraction_confidence} confidence
+                        </span>
+                      )}
+                    </div>
+
+                    {receiptData.extracted_amount == null &&
+                    !receiptData.extracted_reference &&
+                    !receiptData.extracted_date &&
+                    !receiptData.extracted_bank_name ? (
+                      <p className="text-xs text-slate-400">
+                        {receiptData.extraction_notes || "No details could be extracted — verify manually against the image."}
+                      </p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {receiptData.extracted_amount != null && (
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-slate-500 dark:text-slate-400">Amount</span>
+                            <span className="flex items-center gap-2 font-medium text-slate-900 dark:text-white">
+                              ${Number(receiptData.extracted_amount).toFixed(2)}
+                              {receiptData.amount_matches_order === true && (
+                                <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">
+                                  matches order
+                                </span>
+                              )}
+                              {receiptData.amount_matches_order === false && (
+                                <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-500/10 dark:text-red-400">
+                                  mismatch — order is ${Number(selectedOrder.subtotal).toFixed(2)}
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                        )}
+                        {receiptData.extracted_reference && (
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-slate-500 dark:text-slate-400">Reference</span>
+                            <span className="font-medium text-slate-900 dark:text-white">{receiptData.extracted_reference}</span>
+                          </div>
+                        )}
+                        {receiptData.extracted_date && (
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-slate-500 dark:text-slate-400">Date</span>
+                            <span className="font-medium text-slate-900 dark:text-white">{receiptData.extracted_date}</span>
+                          </div>
+                        )}
+                        {receiptData.extracted_bank_name && (
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-slate-500 dark:text-slate-400">Bank</span>
+                            <span className="font-medium text-slate-900 dark:text-white">{receiptData.extracted_bank_name}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {receiptData.extracted_raw_text && (
+                      <div className="mt-2">
+                        <button
+                          onClick={() => setShowRawText((v) => !v)}
+                          className="text-xs font-medium text-emerald-600 hover:underline dark:text-emerald-400"
+                        >
+                          {showRawText ? "Hide" : "Show"} raw OCR text
+                        </button>
+                        {showRawText && (
+                          <pre className="mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap rounded bg-slate-50 p-2 text-[11px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                            {receiptData.extracted_raw_text}
+                          </pre>
+                        )}
+                      </div>
+                    )}
+
+                    <p className="mt-2 text-[11px] text-slate-400">
+                      Automated extraction — always verify against the receipt image before approving.
+                    </p>
+                  </div>
+                )}
+
                 <div className="flex gap-2">
                   <button
                     onClick={() => handleApproveReceipt(selectedOrder.id)}

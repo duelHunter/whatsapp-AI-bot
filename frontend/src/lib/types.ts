@@ -141,6 +141,8 @@ export interface Order {
   receipts?: PaymentReceipt[];
 }
 
+export type ExtractionConfidence = "high" | "medium" | "low";
+
 export interface PaymentReceipt {
   id: string;
   order_id: string;
@@ -151,6 +153,15 @@ export interface PaymentReceipt {
   reviewed_at?: string;
   notes?: string;
   has_media?: boolean;
+  // OCR-extracted fields (advisory only — an admin still approves/rejects manually)
+  extracted_amount?: number | null;
+  extracted_reference?: string | null;
+  extracted_date?: string | null;
+  extracted_bank_name?: string | null;
+  extraction_confidence?: ExtractionConfidence | null;
+  extraction_notes?: string | null;
+  extracted_raw_text?: string | null;
+  amount_matches_order?: boolean;
 }
 
 export interface AgentSettings {

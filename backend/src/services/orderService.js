@@ -309,6 +309,7 @@ async function submitReceipt({ orderId, messageId, waMessageId, mediaType, media
             extracted_bank_name: extraction?.bankName ?? null,
             extraction_confidence: extraction?.confidence ?? null,
             extraction_notes: extraction?.notes ?? null,
+            extracted_raw_text: extraction?.rawText ?? null,
         });
 
     if (receiptErr) throw receiptErr;

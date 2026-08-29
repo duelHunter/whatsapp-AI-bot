@@ -344,6 +344,7 @@ async function runAgent({ conversationHistory, userMessage, toolContext, returnT
     messages.push({ role: 'user', content: userMessage });
 
     let iterations = 0;
+    let retriedEmptyReply = false;
 
     while (iterations < MAX_TOOL_ITERATIONS) {
         const completion = await llmChat(messages, true);
@@ -370,7 +371,19 @@ async function runAgent({ conversationHistory, userMessage, toolContext, returnT
         messages.push(responseMessage);
 
         if (!responseMessage.tool_calls || responseMessage.tool_calls.length === 0) {
-            let reply = responseMessage.content?.trim() || "I'm sorry, I couldn't process that request. Please try again.";
+            const trimmedContent = responseMessage.content?.trim();
+
+            // GUARDRAIL: the model sometimes returns a completely empty reply (no content,
+            // no tool call) — often right after a tool result. Retry once with the same
+            // context before falling back to a generic message.
+            if (!trimmedContent && !retriedEmptyReply) {
+                console.warn('⚠️ Model returned an empty reply, retrying once');
+                retriedEmptyReply = true;
+                messages.pop(); // drop the empty assistant turn so it doesn't pollute the retry
+                continue;
+            }
+
+            let reply = trimmedContent || "I'm sorry, I couldn't process that request. Please try again.";
             // GUARDRAIL: never let leaked internal/tool syntax reach the customer.
             if (containsLeakedInternalSyntax(reply)) {
                 console.warn('⚠️ Blocked reply containing leaked internal syntax:', reply);
@@ -406,8 +419,17 @@ async function runAgent({ conversationHistory, userMessage, toolContext, returnT
         console.warn('⚠️ Agent reached max tool iterations');
     }
 
-    const finalCompletion = await llmChat(messages, false);
-    let reply = finalCompletion.choices?.[0]?.message?.content?.trim() || "I'm sorry, I couldn't process that request. Please try again.";
+    let finalCompletion = await llmChat(messages, false);
+    let finalContent = finalCompletion.choices?.[0]?.message?.content?.trim();
+
+    // GUARDRAIL: same empty-reply retry applies to the max-iterations fallback path.
+    if (!finalContent) {
+        console.warn('⚠️ Model returned an empty final reply, retrying once');
+        finalCompletion = await llmChat(messages, false);
+        finalContent = finalCompletion.choices?.[0]?.message?.content?.trim();
+    }
+
+    let reply = finalContent || "I'm sorry, I couldn't process that request. Please try again.";
     // GUARDRAIL: same leaked-syntax check applies to the max-iterations fallback path.
     if (containsLeakedInternalSyntax(reply)) {
         console.warn('⚠️ Blocked reply containing leaked internal syntax:', reply);
