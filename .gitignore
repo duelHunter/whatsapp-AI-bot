@@ -48,3 +48,11 @@ temp/
 /backend/MESSAGE_PERSISTENCE_SUMMARY.md
 /backend/QUICK_START_MESSAGE_PERSISTENCE.md
 
+# Tesseract OCR language data (auto-downloaded at runtime by tesseract.js)
+*.traineddata
+
+# Local test/scratch files
+/30596aa2-3db2-426f-82a2-8b3ef3b14b9d.jpg
+/f7abe070-46ad-4410-a630-ccce319d4e06.jpg
+/Fund Transfer Receipt-3.pdf
+
