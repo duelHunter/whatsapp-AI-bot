@@ -914,7 +914,9 @@ app.get('/api/orders/:id/receipt', requireAuth, async (req, res) => {
     try {
         const { data: receipt } = await supabaseAdmin
             .from('payment_receipts')
-            .select('id, media_type, media_mime_type, media_data, status, created_at, notes')
+            .select(`id, media_type, media_mime_type, media_data, status, created_at, notes,
+                extracted_amount, extracted_reference, extracted_date, extracted_bank_name,
+                extraction_confidence, extraction_notes`)
             .eq('order_id', req.params.id)
             .order('created_at', { ascending: false })
             .limit(1)
@@ -932,6 +934,19 @@ app.get('/api/orders/:id/receipt', requireAuth, async (req, res) => {
 
         const { media_data, ...meta } = receipt;
         meta.has_media = !!media_data;
+
+        // Advisory hint only — the admin still makes the actual approve/reject call.
+        if (meta.extracted_amount != null) {
+            const { data: order } = await supabaseAdmin
+                .from('orders')
+                .select('subtotal')
+                .eq('id', req.params.id)
+                .single();
+            if (order) {
+                meta.amount_matches_order = Math.abs(Number(meta.extracted_amount) - Number(order.subtotal)) < 0.01;
+            }
+        }
+
         res.json({ ok: true, receipt: meta });
     } catch (err) {
         console.error('Error in GET /api/orders/:id/receipt:', err);

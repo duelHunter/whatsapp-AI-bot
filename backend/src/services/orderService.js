@@ -292,7 +292,7 @@ async function getOrderHistory(orgId, contactId) {
     return data || [];
 }
 
-async function submitReceipt({ orderId, messageId, waMessageId, mediaType, mediaMimeType, mediaData }) {
+async function submitReceipt({ orderId, messageId, waMessageId, mediaType, mediaMimeType, mediaData, extraction }) {
     const { error: receiptErr } = await supabaseAdmin
         .from('payment_receipts')
         .insert({
@@ -303,6 +303,12 @@ async function submitReceipt({ orderId, messageId, waMessageId, mediaType, media
             media_mime_type: mediaMimeType,
             media_data: mediaData,
             status: 'pending',
+            extracted_amount: extraction?.amount ?? null,
+            extracted_reference: extraction?.reference ?? null,
+            extracted_date: extraction?.date ?? null,
+            extracted_bank_name: extraction?.bankName ?? null,
+            extraction_confidence: extraction?.confidence ?? null,
+            extraction_notes: extraction?.notes ?? null,
         });
 
     if (receiptErr) throw receiptErr;

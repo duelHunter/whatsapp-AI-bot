@@ -20,12 +20,15 @@ Your capabilities:
 
 Guidelines:
 - Be conversational and warm, but concise — this is WhatsApp messaging
-- When showing books, format them as a numbered list with title, author, price, and stock
+- When showing books, format them as a numbered list with title, author, price, and availability (use the "availability" field exactly as given — never invent or guess a stock number)
 - When a customer wants to add a book, use the book's ID from search results
 - Always show the cart total after modifications
-- When confirming an order, clearly display the bank transfer details and ask the customer to send a photo of their transfer receipt
+- When confirming an order, clearly display the bank transfer details and the order number, and ask the customer to send a photo of their transfer receipt
 - If a book is out of stock, let the customer know and suggest alternatives
 - Use emojis sparingly to keep messages friendly
+- Do not use lines made only of symbols (like "***" or "---") as dividers — WhatsApp does not render them, they just show up as stray characters
+- Never narrate your own process to the customer — no "let me try that again", "attempting to...", "please wait while I...", or describing errors/retries that happened behind the scenes. Only send the final outcome, once you have it, in one message
+- Never ask the customer a confirming question and then answer it yourself in the same message (e.g. "if this is correct, confirming now!"). If you are not certain the customer wants to finalize the order, ask them and stop there — wait for their next message before calling confirm_order
 - For questions unrelated to books/orders, use the search_kb tool to find answers from the knowledge base`;
 
 const tools = [
@@ -168,6 +171,19 @@ const tools = [
     },
 ];
 
+// GUARDRAIL: the exact stock count is internal — customers only need to know whether
+// something is available, not the warehouse number. Strip `stock` before it ever
+// reaches the model so it can't be shown (or hallucinated) verbatim.
+function toCustomerFacingBook(book) {
+    if (!book) return book;
+    const { stock, ...rest } = book;
+    const n = Number(stock) || 0;
+    return {
+        ...rest,
+        availability: n <= 0 ? 'Out of stock' : n <= 5 ? 'Low stock — order soon' : 'In stock',
+    };
+}
+
 async function executeTool(name, args, ctx) {
     console.log(`🔧 Tool called: ${name}`, JSON.stringify(args));
     const startTime = Date.now();
@@ -179,11 +195,13 @@ async function executeTool(name, args, ctx) {
                 if (!books || books.length === 0) {
                     return { books: [], message: `No books found matching "${args.query}"${args.category ? ` in category "${args.category}"` : ''}. Do not search again with the same query. Tell the customer this title is not available in our catalog.` };
                 }
-                return { books };
+                return { books: books.map(toCustomerFacingBook) };
             }
 
-            case 'get_book_details':
-                return await orderService.getBookDetails(ctx.orgId, args.book_id) || { error: 'Book not found' };
+            case 'get_book_details': {
+                const book = await orderService.getBookDetails(ctx.orgId, args.book_id);
+                return book ? toCustomerFacingBook(book) : { error: 'Book not found' };
+            }
 
             case 'get_cart':
                 return await orderService.getCart(ctx.orgId, ctx.contactId);
@@ -238,6 +256,38 @@ async function executeTool(name, args, ctx) {
     } finally {
         console.log(`   ⏱️ ${name} completed in ${Date.now() - startTime}ms`);
     }
+}
+
+// GUARDRAIL: some local/quantized models (e.g. qwen3-coder via Ollama) occasionally emit
+// tool calls as plain text instead of using the structured `tool_calls` field, e.g.:
+// <function=search_books><parameter=query>all</parameter></function></tool_call>
+// This parses that pattern out so it can be executed as a real tool call instead of
+// leaking raw internal syntax to the customer.
+const FAKE_TOOL_CALL_PATTERN = /<function=([a-zA-Z0-9_]+)>([\s\S]*?)<\/function>/;
+
+function parseFallbackToolCalls(content) {
+    if (!content) return [];
+    const calls = [];
+    const funcRegex = /<function=([a-zA-Z0-9_]+)>([\s\S]*?)<\/function>/g;
+    let match;
+    while ((match = funcRegex.exec(content)) !== null) {
+        const [, name, paramsBlock] = match;
+        const args = {};
+        const paramRegex = /<parameter=([a-zA-Z0-9_]+)>([\s\S]*?)<\/parameter>/g;
+        let pMatch;
+        while ((pMatch = paramRegex.exec(paramsBlock)) !== null) {
+            args[pMatch[1]] = pMatch[2].trim();
+        }
+        calls.push({ name, arguments: args });
+    }
+    return calls;
+}
+
+// GUARDRAIL: catches any leftover internal/tool syntax that should never reach the
+// customer (fallback parsing missed it, model echoed raw JSON, stray XML tags, etc).
+function containsLeakedInternalSyntax(content) {
+    if (!content) return false;
+    return /<function=|<\/tool_call>|<parameter=|"tool_calls"\s*:/i.test(content);
 }
 
 async function llmChat(messages, useTools = true) {

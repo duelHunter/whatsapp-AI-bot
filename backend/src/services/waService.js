@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { supabaseAdmin } = require('../auth/supabase');
 const { saveIncomingMessage, saveOutgoingMessage } = require('./messageStore');
+const { extractReceiptData } = require('./receiptVerification');
 const {
     updateWhatsAppStatus,
     getFirstWhatsAppAccount
@@ -31,6 +32,12 @@ class WhatsAppService {
         // the same customer message if whatsapp-web.js ever fires message_create twice for it
         // (seen in practice — causes duplicate consecutive history entries and duplicate replies)
         this.recentlyProcessedIncomingIds = new Set();
+        // GUARDRAIL: per-contact processing queue. Two messages from the same customer
+        // arriving close together must never run handleMessage concurrently — otherwise
+        // both can read the same cart/order state before either write lands (e.g. two
+        // "Proceed" messages both seeing a draft order and racing on confirm_order).
+        // Keyed by msg.from (the WhatsApp JID); each contact gets its own serial chain.
+        this.contactQueues = new Map();
         // Whether the bot should auto-reply (admin-toggleable, persisted in DB)
         this.botEnabled = true;
     }
@@ -323,10 +330,29 @@ class WhatsAppService {
         
             // if (!isPrivateChat || isStatus) return;
             
-            if (msg.fromMe || isStatus) return; 
+            if (msg.fromMe || isStatus) return;
 
-            await this.handleMessage(msg);
+            await this.enqueueForContact(msg.from, () => this.handleMessage(msg));
         });
+    }
+
+    /**
+     * GUARDRAIL: run `task` after any already-queued task for the same contact has
+     * finished, so messages from one customer are always handled strictly in order
+     * and never concurrently (prevents cart/order state races like double-confirm).
+     */
+    enqueueForContact(key, task) {
+        const prevTail = this.contactQueues.get(key) || Promise.resolve();
+        const tail = prevTail
+            .then(() => task())
+            .catch(err => console.error(`❌ Error processing queued message for ${key}:`, err))
+            .finally(() => {
+                if (this.contactQueues.get(key) === tail) {
+                    this.contactQueues.delete(key);
+                }
+            });
+        this.contactQueues.set(key, tail);
+        return tail;
     }
 
     /**
@@ -727,13 +753,24 @@ class WhatsAppService {
                 if (pendingOrder) {
                     try {
                         const media = await msg.downloadMedia();
+                        const mediaBuffer = media?.data ? Buffer.from(media.data, 'base64') : null;
+
+                        // Advisory only — extraction failures must never block receipt
+                        // submission, they just leave the admin without an extraction hint.
+                        const extraction = await extractReceiptData(mediaBuffer, media?.mimetype)
+                            .catch(err => {
+                                console.error('❌ Receipt extraction threw unexpectedly:', err);
+                                return null;
+                            });
+
                         await orderService.submitReceipt({
                             orderId: pendingOrder.id,
                             messageId: null,
                             waMessageId: msg.id._serialized,
                             mediaType: msg.type,
                             mediaMimeType: media?.mimetype || 'application/octet-stream',
-                            mediaData: media?.data ? Buffer.from(media.data, 'base64') : null,
+                            mediaData: mediaBuffer,
+                            extraction,
                         });
 
                         const reply = `Thank you! We've received your payment receipt for order #${pendingOrder.order_number}. Our team will verify it shortly and confirm your order.`;
